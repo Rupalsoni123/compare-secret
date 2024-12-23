@@ -71,11 +71,17 @@ jobs:
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
-          # Decode and escape the differences
+          # Decode the base64 string
           DECODED_DIFF=$(echo "${{ env.DIFFERENCES }}" | base64 --decode)
 
-          # Format the differences as key-value pairs
-          FORMATTED_DIFF=$(echo "$DECODED_DIFF" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
+          # Check if the decoded string is valid JSON
+          if echo "$DECODED_DIFF" | jq empty; then
+              # Format the differences as key-value pairs if valid JSON
+              FORMATTED_DIFF=$(echo "$DECODED_DIFF" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
+          else
+              # If not valid JSON, treat the decoded diff as raw text
+              FORMATTED_DIFF="Decoded difference is not in valid JSON format: $DECODED_DIFF"
+          fi
 
           # Send Slack notification
           curl -X POST -H 'Content-type: application/json' \
