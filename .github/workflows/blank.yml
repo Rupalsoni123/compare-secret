@@ -52,9 +52,8 @@ jobs:
             echo "match=true" >> $GITHUB_ENV
           else
             echo "match=false" >> $GITHUB_ENV
-            # Encode differences in base64 for Slack message
-            ENCODED_DIFF=$(echo "$DIFF_KEYS" | base64)
-            echo "DIFFERENCES=$ENCODED_DIFF" >> $GITHUB_ENV
+            # Save the differences directly without encoding in base64
+            echo "DIFFERENCES=$DIFF_KEYS" >> $GITHUB_ENV
           fi
 
       # Step 5: Send Slack notification for identical secrets
@@ -68,12 +67,12 @@ jobs:
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
-          # Decode the base64 string
-          DECODED_DIFF=$(echo "${{ env.DIFFERENCES }}" | base64 --decode)
+          # Use the raw diff directly
+          DIFF_CONTENT="${{ env.DIFFERENCES }}"
 
-          # Print the decoded diff for debugging
-          echo "Decoded Differences: $DECODED_DIFF"
+          # Print the raw diff for debugging
+          echo "Differences: $DIFF_CONTENT"
 
-          # Send Slack notification with the decoded differences (raw diff)
+          # Send Slack notification with the raw diff differences
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences:\n'"$DECODED_DIFF"'}' ${{ secrets.SLACK_WEBHOOK_URL }}
+          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences:\n'"$DIFF_CONTENT"'}' ${{ secrets.SLACK_WEBHOOK_URL }}
