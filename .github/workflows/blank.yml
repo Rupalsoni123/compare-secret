@@ -54,7 +54,8 @@ jobs:
           set -e
 
           # Compare the two cleaned secrets for differences
-          DIFF_KEYS=$(diff <(echo "$SECRET1_CLEAN") <(echo "$SECRET2_CLEAN") || true)
+          # Use jq to convert the JSON strings into sorted keys and values for comparison
+          DIFF_KEYS=$(diff <(echo "$SECRET1_CLEAN" | jq -S .) <(echo "$SECRET2_CLEAN" | jq -S .) || true)
 
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
