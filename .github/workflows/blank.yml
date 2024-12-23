@@ -39,6 +39,10 @@ jobs:
           SECRET1_CLEAN=$(echo "$SECRET1" | jq -r tostring || echo "$SECRET1")
           SECRET2_CLEAN=$(echo "$SECRET2" | jq -r tostring || echo "$SECRET2")
 
+          # Trim leading/trailing whitespace and newlines from secrets
+          SECRET1_CLEAN=$(echo "$SECRET1_CLEAN" | xargs)
+          SECRET2_CLEAN=$(echo "$SECRET2_CLEAN" | xargs)
+
           # Save cleaned secrets to environment variables for comparison
           echo "SECRET1=$SECRET1_CLEAN" >> $GITHUB_ENV
           echo "SECRET2=$SECRET2_CLEAN" >> $GITHUB_ENV
