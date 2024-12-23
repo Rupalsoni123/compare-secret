@@ -45,12 +45,8 @@ jobs:
         run: |
           set -e
 
-          # Parse secrets as JSON key-value pairs using jq
-          SECRET1_JSON=$(echo "$SECRET1" | jq -c .)
-          SECRET2_JSON=$(echo "$SECRET2" | jq -c .)
-
           # Compare the two secrets for differences
-          DIFF_KEYS=$(diff <(echo "$SECRET1_JSON") <(echo "$SECRET2_JSON") || true)
+          DIFF_KEYS=$(diff <(echo "$SECRET1") <(echo "$SECRET2") || true)
 
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
@@ -78,10 +74,6 @@ jobs:
           # Print the decoded diff for debugging
           echo "Decoded Differences: $DECODED_DIFF"
 
-          # Ensure proper formatting for Slack notification
-          # Format the differences as key-value pairs or raw text
-          FORMATTED_DIFF=$(echo "$DECODED_DIFF" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]' || echo "Invalid JSON format, raw diff: $DECODED_DIFF")
-
-          # Send Slack notification
+          # Send Slack notification with the decoded differences (raw diff)
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences:\n'"$(echo "$FORMATTED_DIFF" | jq -Rs .)"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences:\n'"$DECODED_DIFF"'}' ${{ secrets.SLACK_WEBHOOK_URL }}
