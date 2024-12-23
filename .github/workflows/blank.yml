@@ -10,13 +10,19 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-cli@v2
+      # Step 1: Install jq
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      # Step 2: Configure AWS CLI
+      - name: Configure AWS CLI
+        uses: aws-actions/configure-aws-cli@v2.5.0
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1 # Default region for AWS CLI
 
+      # Step 3: Fetch secrets from both regions
       - name: Fetch secrets from both regions
         id: fetch_secrets
         run: |
@@ -25,37 +31,42 @@ jobs:
           # Define regions and secret name
           REGION1="us-east-1"
           REGION2="us-west-2"
-          SECRET_NAME="your-secret-name"
+          SECRET_NAME="prod"
 
           # Fetch secrets from both regions
           SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
           # Save secrets to environment variables for comparison
-          echo "SECRET1=$SECRET1" >> $GITHUB_ENV
-          echo "SECRET2=$SECRET2" >> $GITHUB_ENV
+          echo "SECRET1='$SECRET1'" >> $GITHUB_ENV
+          echo "SECRET2='$SECRET2'" >> $GITHUB_ENV
 
+      # Step 4: Compare secrets and find differences
       - name: Compare secrets and find differences
         id: compare_secrets
         run: |
           set -e
-          DIFF_KEYS=$(diff <(echo "$SECRET1" | jq -S .) <(echo "$SECRET2" | jq -S .) | grep -E '^<|^>' | jq -R . | jq -s .)
+
+          # Compare the two JSON strings and find differences
+          DIFF_KEYS=$(diff <(echo "$SECRET1" | jq -S .) <(echo "$SECRET2" | jq -S .) || true)
           
-          if [ "$DIFF_KEYS" == "[]" ]; then
+          if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
           else
             echo "match=false" >> $GITHUB_ENV
-            echo "DIFFERENCES=$DIFF_KEYS" >> $GITHUB_ENV
+            echo "DIFFERENCES=$(echo "$DIFF_KEYS" | jq -R . | jq -s .)" >> $GITHUB_ENV
           fi
 
+      # Step 5: Send Slack notification for identical secrets
       - name: Send Slack notification for identical secrets
         if: ${{ env.match == 'true' }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"✅ Secrets in both regions are identical."}' ${{ secrets.SLACK_WEBHOOK_URL }}
 
+      # Step 6: Notify of differences in secrets
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences: '"$DIFFERENCES"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences: '"${{ env.DIFFERENCES }}"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
