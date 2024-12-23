@@ -58,6 +58,7 @@ jobs:
             echo "match=false" >> $GITHUB_ENV
             # Encode differences in base64 for Slack message
             echo "DIFFERENCES=$(echo "$DIFF_KEYS" | base64)" >> $GITHUB_ENV
+          fi  # Closing 'if' statement correctly
 
       # Step 5: Send Slack notification for identical secrets
       - name: Send Slack notification for identical secrets
