@@ -33,7 +33,7 @@ jobs:
           REGION2="us-west-2"
           SECRET_NAME="prod"
 
-          # Fetch secrets from both regions
+          # Fetch secrets from both regions (SecretString is a JSON)
           SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
@@ -47,9 +47,9 @@ jobs:
         run: |
           set -e
 
-          # Ensure that the secrets are valid JSON by escaping any internal quotes
-          SECRET1_JSON=$(echo "$SECRET1" | jq -c -S .)
-          SECRET2_JSON=$(echo "$SECRET2" | jq -c -S .)
+          # Parse the secrets as JSON key-value pairs using jq
+          SECRET1_JSON=$(echo "$SECRET1" | jq -c .)
+          SECRET2_JSON=$(echo "$SECRET2" | jq -c .)
 
           # Compare the two secrets for differences
           DIFF_KEYS=$(diff <(echo "$SECRET1_JSON") <(echo "$SECRET2_JSON") || true)
