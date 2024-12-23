@@ -79,6 +79,7 @@ jobs:
           DIFF_CONTENT="${{ env.DIFFERENCES }}"
 
           # Format the differences into a more readable key-value format
+          # Extract lines with a plus sign ('+') indicating differences
           DIFF_JSON=$(echo "$DIFF_CONTENT" | grep -oP '^\+.*' | sed 's/^+//' | jq -R 'split(": ") | {(. [0]): .[1]}')
 
           # Create a formatted message for Slack
