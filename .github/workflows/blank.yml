@@ -60,8 +60,18 @@ jobs:
           # Log the comparison
           echo "Comparing SECRET1 and SECRET2"
 
-          # Use jq to convert the JSON strings into sorted keys and values for comparison
-          DIFF_KEYS=$(diff <(echo "$SECRET1_CLEAN" | jq -S .) <(echo "$SECRET2_CLEAN" | jq -S .) || true)
+          # Ensure the secrets are valid JSON
+          SECRET1_JSON=$(echo "$SECRET1_CLEAN" | jq -c .)
+          SECRET2_JSON=$(echo "$SECRET2_CLEAN" | jq -c .)
+
+          # Check if they are valid JSON
+          if [[ "$SECRET1_JSON" == "null" || "$SECRET2_JSON" == "null" ]]; then
+            echo "One or both secrets are not valid JSON, falling back to string comparison."
+            DIFF_KEYS=$(diff <(echo "$SECRET1_CLEAN") <(echo "$SECRET2_CLEAN") || true)
+          else
+            # Use jq to convert the JSON strings into sorted keys and values for comparison
+            DIFF_KEYS=$(diff <(echo "$SECRET1_JSON" | jq -S .) <(echo "$SECRET2_JSON" | jq -S .) || true)
+          fi
 
           # Log the diff result for debugging
           echo "DIFFERENCES: $DIFF_KEYS"
@@ -72,7 +82,6 @@ jobs:
             echo "match=false" >> $GITHUB_ENV
             # Save the differences directly
             echo "DIFFERENCES=$DIFF_KEYS" >> $GITHUB_ENV
-          fi
 
       # Step 5: Send Slack notification for identical secrets
       - name: Send Slack notification for identical secrets
