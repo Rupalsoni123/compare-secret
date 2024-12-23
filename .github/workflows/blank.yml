@@ -45,8 +45,12 @@ jobs:
         run: |
           set -e
 
-          # Compare the two secrets for differences
-          DIFF_KEYS=$(diff <(echo "$SECRET1") <(echo "$SECRET2") || true)
+          # Compact JSON for both secrets using jq
+          SECRET1_COMPACT=$(echo "$SECRET1" | jq -c .)
+          SECRET2_COMPACT=$(echo "$SECRET2" | jq -c .)
+
+          # Compare the compacted secrets
+          DIFF_KEYS=$(diff <(echo "$SECRET1_COMPACT") <(echo "$SECRET2_COMPACT") || true)
 
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
