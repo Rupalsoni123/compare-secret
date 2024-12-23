@@ -35,13 +35,13 @@ jobs:
           SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "")
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "")
 
+          # Log secrets to debug
+          echo "Fetched SECRET1: $SECRET1"
+          echo "Fetched SECRET2: $SECRET2"
+
           # Clean secrets if they are in JSON format (using jq to parse)
           SECRET1_CLEAN=$(echo "$SECRET1" | jq -r tostring || echo "$SECRET1")
           SECRET2_CLEAN=$(echo "$SECRET2" | jq -r tostring || echo "$SECRET2")
-
-          # Log the cleaned secrets for debugging
-          echo "SECRET1_CLEAN: $SECRET1_CLEAN"
-          echo "SECRET2_CLEAN: $SECRET2_CLEAN"
 
           # Trim leading/trailing whitespace and newlines from secrets
           SECRET1_CLEAN=$(echo "$SECRET1_CLEAN" | xargs)
@@ -61,11 +61,11 @@ jobs:
           echo "Comparing SECRET1 and SECRET2"
 
           # Ensure the secrets are valid JSON
-          SECRET1_JSON=$(echo "$SECRET1_CLEAN" | jq -c .)
-          SECRET2_JSON=$(echo "$SECRET2_CLEAN" | jq -c .)
+          SECRET1_JSON=$(echo "$SECRET1_CLEAN" | jq -c . || echo "invalid")
+          SECRET2_JSON=$(echo "$SECRET2_CLEAN" | jq -c . || echo "invalid")
 
           # Check if they are valid JSON
-          if [[ "$SECRET1_JSON" == "null" || "$SECRET2_JSON" == "null" ]]; then
+          if [[ "$SECRET1_JSON" == "invalid" || "$SECRET2_JSON" == "invalid" ]]; then
             echo "One or both secrets are not valid JSON, falling back to string comparison."
             DIFF_KEYS=$(diff <(echo "$SECRET1_CLEAN") <(echo "$SECRET2_CLEAN") || true)
           else
