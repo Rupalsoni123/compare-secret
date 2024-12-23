@@ -39,6 +39,10 @@ jobs:
           SECRET1_CLEAN=$(echo "$SECRET1" | jq -r tostring || echo "$SECRET1")
           SECRET2_CLEAN=$(echo "$SECRET2" | jq -r tostring || echo "$SECRET2")
 
+          # Log the cleaned secrets for debugging
+          echo "SECRET1_CLEAN: $SECRET1_CLEAN"
+          echo "SECRET2_CLEAN: $SECRET2_CLEAN"
+
           # Trim leading/trailing whitespace and newlines from secrets
           SECRET1_CLEAN=$(echo "$SECRET1_CLEAN" | xargs)
           SECRET2_CLEAN=$(echo "$SECRET2_CLEAN" | xargs)
@@ -53,9 +57,14 @@ jobs:
         run: |
           set -e
 
-          # Compare the two cleaned secrets for differences
+          # Log the comparison
+          echo "Comparing SECRET1 and SECRET2"
+
           # Use jq to convert the JSON strings into sorted keys and values for comparison
           DIFF_KEYS=$(diff <(echo "$SECRET1_CLEAN" | jq -S .) <(echo "$SECRET2_CLEAN" | jq -S .) || true)
+
+          # Log the diff result for debugging
+          echo "DIFFERENCES: $DIFF_KEYS"
 
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
@@ -79,8 +88,10 @@ jobs:
           # Extract the differences
           DIFF_CONTENT="${{ env.DIFFERENCES }}"
 
+          # Log the differences content for debugging
+          echo "Raw DIFF_CONTENT: $DIFF_CONTENT"
+
           # Format the differences into a more readable key-value format
-          # Extract lines with a plus sign ('+') indicating differences
           DIFF_JSON=$(echo "$DIFF_CONTENT" | grep -oP '^\+.*' | sed 's/^+//' | jq -R 'split(": ") | {(. [0]): .[1]}')
 
           # Create a formatted message for Slack
