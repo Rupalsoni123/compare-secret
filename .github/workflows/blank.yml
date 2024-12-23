@@ -8,7 +8,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Install jq
+      # Step 1: Install jq (optional if you're not using JSON)
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
@@ -31,9 +31,9 @@ jobs:
           REGION2="us-west-2"
           SECRET_NAME="prod"
 
-          # Fetch secrets from both regions
-          SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
-          SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
+          # Fetch secrets from both regions as plain text
+          SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "")
+          SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "")
 
           # Save secrets to environment variables for comparison
           echo "SECRET1=$SECRET1" >> $GITHUB_ENV
@@ -45,18 +45,14 @@ jobs:
         run: |
           set -e
 
-          # Compact JSON for both secrets using jq
-          SECRET1_COMPACT=$(echo "$SECRET1" | jq -c .)
-          SECRET2_COMPACT=$(echo "$SECRET2" | jq -c .)
-
-          # Compare the compacted secrets
-          DIFF_KEYS=$(diff <(echo "$SECRET1_COMPACT") <(echo "$SECRET2_COMPACT") || true)
+          # Compare the two secrets for differences
+          DIFF_KEYS=$(diff <(echo "$SECRET1") <(echo "$SECRET2") || true)
 
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
           else
             echo "match=false" >> $GITHUB_ENV
-            # Save the differences directly without encoding in base64
+            # Save the differences directly
             echo "DIFFERENCES=$DIFF_KEYS" >> $GITHUB_ENV
           fi
 
