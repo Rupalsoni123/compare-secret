@@ -48,8 +48,8 @@ jobs:
           set -e
 
           # Parse secrets and compare
-          SECRET1_JSON=$(echo "$SECRET1" | jq -S .)
-          SECRET2_JSON=$(echo "$SECRET2" | jq -S .)
+          SECRET1_JSON=$(echo "$SECRET1" | jq -c -S .)
+          SECRET2_JSON=$(echo "$SECRET2" | jq -c -S .)
           DIFF_KEYS=$(diff <(echo "$SECRET1_JSON") <(echo "$SECRET2_JSON") || true)
 
           if [ -z "$DIFF_KEYS" ]; then
@@ -71,9 +71,9 @@ jobs:
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
-          # Decode the differences and escape JSON
+          # Decode and escape the differences
           DECODED_DIFF=$(echo "${{ env.DIFFERENCES }}" | base64 --decode)
-          ESCAPED_DIFF=$(printf '%s' "$DECODED_DIFF" | jq -R .)
+          ESCAPED_DIFF=$(echo "$DECODED_DIFF" | jq -R .)
 
           # Send Slack notification
           curl -X POST -H 'Content-type: application/json' \
