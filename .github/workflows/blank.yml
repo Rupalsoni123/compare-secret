@@ -47,17 +47,17 @@ jobs:
         run: |
           set -e
 
-          # Compare the two JSON strings and find differences
-          DIFF_KEYS=$(diff <(echo "$SECRET1" | jq -S .) <(echo "$SECRET2" | jq -S .) || true)
+          # Parse secrets and compare
+          SECRET1_JSON=$(echo "$SECRET1" | jq -S .)
+          SECRET2_JSON=$(echo "$SECRET2" | jq -S .)
+          DIFF_KEYS=$(diff <(echo "$SECRET1_JSON") <(echo "$SECRET2_JSON") || true)
 
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
           else
             echo "match=false" >> $GITHUB_ENV
-
-            # Store differences for Slack message
-            DIFFERENCES=$(echo "$DIFF_KEYS" | base64)
-            echo "DIFFERENCES=$DIFFERENCES" >> $GITHUB_ENV
+            # Encode differences in base64 for Slack message
+            echo "DIFFERENCES=$(echo "$DIFF_KEYS" | base64)" >> $GITHUB_ENV
           fi
 
       # Step 5: Send Slack notification for identical secrets
@@ -71,9 +71,9 @@ jobs:
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
-          # Decode and escape the differences
+          # Decode the differences and escape JSON
           DECODED_DIFF=$(echo "${{ env.DIFFERENCES }}" | base64 --decode)
-          ESCAPED_DIFF=$(echo "$DECODED_DIFF" | jq -R .)
+          ESCAPED_DIFF=$(printf '%s' "$DECODED_DIFF" | jq -R .)
 
           # Send Slack notification
           curl -X POST -H 'Content-type: application/json' \
