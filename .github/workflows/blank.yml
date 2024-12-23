@@ -59,7 +59,7 @@ jobs:
             # Encode differences in base64 for Slack message
             ENCODED_DIFF=$(echo "$DIFF_KEYS" | base64)
             echo "DIFFERENCES=$ENCODED_DIFF" >> $GITHUB_ENV
-          fi  # Closing 'if' statement correctly
+          fi
 
       # Step 5: Send Slack notification for identical secrets
       - name: Send Slack notification for identical secrets
@@ -79,7 +79,7 @@ jobs:
           echo "Decoded Differences: $DECODED_DIFF"
 
           # Check if the decoded string is valid JSON
-          if echo "$DECODED_DIFF" | jq empty; then
+          if echo "$DECODED_DIFF" | jq empty > /dev/null 2>&1; then
               # Format the differences as key-value pairs if valid JSON
               FORMATTED_DIFF=$(echo "$DECODED_DIFF" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
           else
