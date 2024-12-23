@@ -38,8 +38,8 @@ jobs:
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
           # Save secrets to environment variables for comparison
-          echo "SECRET1=$(printf '%s' "$SECRET1")" >> $GITHUB_ENV
-          echo "SECRET2=$(printf '%s' "$SECRET2")" >> $GITHUB_ENV
+          echo "SECRET1=$(printf '%s' \"$SECRET1\")" >> $GITHUB_ENV
+          echo "SECRET2=$(printf '%s' \"$SECRET2\")" >> $GITHUB_ENV
 
       # Step 4: Compare secrets and find differences
       - name: Compare secrets and find differences
@@ -49,14 +49,14 @@ jobs:
 
           # Compare the two JSON strings and find differences
           DIFF_KEYS=$(diff <(echo "$SECRET1" | jq -S .) <(echo "$SECRET2" | jq -S .) || true)
-          
+
           if [ -z "$DIFF_KEYS" ]; then
             echo "match=true" >> $GITHUB_ENV
           else
             echo "match=false" >> $GITHUB_ENV
 
             # Store differences for Slack message
-            DIFFERENCES=$(echo "$DIFF_KEYS" | jq -R . | jq -s .)
+            DIFFERENCES=$(echo "$DIFF_KEYS" | base64)
             echo "DIFFERENCES=$DIFFERENCES" >> $GITHUB_ENV
           fi
 
@@ -71,5 +71,10 @@ jobs:
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
+          # Decode and escape the differences
+          DECODED_DIFF=$(echo "${{ env.DIFFERENCES }}" | base64 --decode)
+          ESCAPED_DIFF=$(echo "$DECODED_DIFF" | jq -R .)
+
+          # Send Slack notification
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences: \n'"${{ env.DIFFERENCES }}"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
+          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences:\n'"$ESCAPED_DIFF"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
