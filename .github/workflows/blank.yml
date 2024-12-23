@@ -75,12 +75,18 @@ jobs:
       - name: Notify of differences in secrets
         if: ${{ env.match == 'false' }}
         run: |
-          # Use the raw diff directly
+          # Extract the differences
           DIFF_CONTENT="${{ env.DIFFERENCES }}"
 
-          # Print the raw diff for debugging
-          echo "Differences: $DIFF_CONTENT"
+          # Format the differences into a more readable key-value format
+          DIFF_JSON=$(echo "$DIFF_CONTENT" | grep -oP '^\+.*' | sed 's/^+//' | jq -R 'split(": ") | {(. [0]): .[1]}')
+
+          # Create a formatted message for Slack
+          SLACK_MESSAGE="⚠️ Secrets in both regions do not match. Here are the differences:\n$DIFF_JSON"
+
+          # Print the formatted differences for debugging
+          echo "Formatted Differences: $SLACK_MESSAGE"
 
           # Send Slack notification with the raw diff differences
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nDifferences:\n'"$DIFF_CONTENT"'}' ${{ secrets.SLACK_WEBHOOK_URL }}
+          --data '{"text":"'"$SLACK_MESSAGE"'"}' ${{ secrets.SLACK_WEBHOOK_URL }}
