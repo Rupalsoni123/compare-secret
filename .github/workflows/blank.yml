@@ -90,7 +90,7 @@ jobs:
         run: |
           echo "Mismatches file: mismatches.json" # Debug output for mismatches
 
-          # Prepare the JSON string with mismatches in the message
+          # Read mismatches into a string
           MISMATCHES_STRING=$(cat mismatches.json)
 
           # Notify Slack with mismatches as an attachment
