@@ -50,6 +50,12 @@ jobs:
           SECRET1_JSON=$(echo "${{ env.SECRET1 }}" | jq -c .)
           SECRET2_JSON=$(echo "${{ env.SECRET2 }}" | jq -c .)
 
+          # Ensure valid JSON
+          if [[ -z "$SECRET1_JSON" || -z "$SECRET2_JSON" ]]; then
+            echo "Invalid JSON in secrets." >&2
+            exit 1
+          fi
+
           # Identify mismatched keys and values
           DIFF=$(diff <(echo "$SECRET1_JSON" | jq -S .) <(echo "$SECRET2_JSON" | jq -S .) || true)
           MISMATCHES=$(jq -n --argjson s1 "$SECRET1_JSON" --argjson s2 "$SECRET2_JSON" \
@@ -67,14 +73,14 @@ jobs:
 
       # Step 5: Notify Slack if secrets match
       - name: Notify Slack - Secrets Match
-        if: ${{ env.match == 'true' }}
+        if: env.match == 'true'
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"✅ Secrets in both regions are identical."}' ${{ secrets.SLACK_WEBHOOK_URL }}
 
       # Step 6: Notify Slack with differences if secrets do not match
       - name: Notify Slack - Secrets Mismatched
-        if: ${{ env.match == 'false' }}
+        if: env.match == 'false'
         run: |
           MISMATCHES=$(echo "${{ env.MISMATCHES }}" | jq -c .)
           curl -X POST -H 'Content-type: application/json' \
