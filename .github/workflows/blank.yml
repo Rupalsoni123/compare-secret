@@ -63,8 +63,11 @@ jobs:
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
+              # Serialize mismatches to a string format
+              MISMATCHES_STRING=$(echo "$MISMATCHES" | jq -c .)
+
               # Save mismatches as environment variable
-              echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
+              echo "mismatches=$MISMATCHES_STRING" >> $GITHUB_ENV
           fi
         env:
           SECRET1: ${{ env.SECRET1 }}
@@ -84,6 +87,6 @@ jobs:
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data "$(jq -n --arg text "⚠️ Secrets in both regions do not match." \
-          --arg mismatches "$MISMATCHES" \
+          --arg mismatches "$MISMATCHES_STRING" \
           '{text: $text, details: $mismatches}')" \
           ${{ secrets.SLACK_WEBHOOK_URL }}
