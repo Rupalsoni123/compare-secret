@@ -48,6 +48,9 @@ jobs:
           IFS=' ' read -r -a SECRET_LIST1_ARRAY <<< "$SECRET_LIST1"
           IFS=' ' read -r -a SECRET_LIST2_ARRAY <<< "$SECRET_LIST2"
 
+          # Initialize a variable to track mismatches
+          MISMATCHES=false
+
           # Loop through each secret in region1 and compare with region2
           for SECRET_NAME in "${SECRET_LIST1_ARRAY[@]}"; do
             echo "Comparing secret: $SECRET_NAME"
@@ -65,6 +68,7 @@ jobs:
                 echo "$SECRET_NAME: match=true" >> $GITHUB_ENV
             else
                 echo "$SECRET_NAME: match=false" >> $GITHUB_ENV
+                MISMATCHES=true
 
                 # Identify mismatches using JSON comparison
                 REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c --argjson secret2 "$SORTED_SECRET2" \
@@ -79,18 +83,15 @@ jobs:
 
                 # Save mismatches to a file
                 echo "$MISMATCHES" > mismatches_$SECRET_NAME.json
-
-                # Serialize mismatches to a string format
-                MISMATCHES_STRING=$(echo "$MISMATCHES" | jq -c .)
-
-                # Save mismatches as environment variable
-                echo "mismatches_$SECRET_NAME=$MISMATCHES_STRING" >> $GITHUB_ENV
             fi
           done
 
+          # Save the mismatch status to the environment variable
+          echo "MISMATCHES=$MISMATCHES" >> $GITHUB_ENV
+
       # Step 4: Notify Slack - Secrets Match
       - name: Notify Slack - Secrets Match
-        if: ${{ contains(env.match, 'true') }}
+        if: ${{ env.MISMATCHES == 'false' }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"✅ All secrets are identical across regions."}' \
@@ -98,7 +99,7 @@ jobs:
 
       # Step 5: Notify Slack - Secrets Mismatched
       - name: Notify Slack - Secrets Mismatched
-        if: ${{ contains(env.match, 'false') }}
+        if: ${{ env.MISMATCHES == 'true' }}
         run: |
           echo "Mismatches found, sending details..." # Debug output for mismatches
 
