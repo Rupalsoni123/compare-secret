@@ -56,7 +56,7 @@ jobs:
               REGION2_MISMATCHES=$(echo "$REGION2_ONLY" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
 
               if [[ -n "$REGION1_MISMATCHES" || -n "$REGION2_MISMATCHES" ]]; then
-                # Use --arg instead of --argjson to pass plain strings
+                # Format mismatches as human-readable key-value pairs for each region
                 MISMATCHES=$(echo "$MISMATCHES" | jq -c --arg SECRET_NAME "$SECRET_NAME" \
                   --arg REGION1 "$REGION1_MISMATCHES" --arg REGION2 "$REGION2_MISMATCHES" \
                   '.mismatched_envs[$SECRET_NAME] = { "region1": $REGION1, "region2": $REGION2 }')
@@ -79,4 +79,3 @@ jobs:
         if: ${{ steps.compare-secrets.outputs.mismatches != '{}' }}
         run: |
           curl -X POST -H 'Content-type: application/json' --data '{"text": "Secrets mismatch detected between AWS regions. Please check the mismatches.json artifact for details."}' ${{ secrets.SLACK_WEBHOOK_URL }}
-
