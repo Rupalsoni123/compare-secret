@@ -1,4 +1,4 @@
-name: Compare AWS Secrets
+name: Compare All AWS Secrets
 
 on:
   workflow_dispatch: # Allows manual triggering of the workflow
@@ -18,92 +18,99 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1 # Default region for AWS CLI
 
-      # Step 2: Fetch secrets from both regions
-      - name: Fetch secrets from both regions
+      # Step 2: Fetch the list of all secrets from both regions
+      - name: Fetch all secrets from both regions
         id: fetch_secrets
         run: |
           set -e
 
           REGION1="us-east-1"
           REGION2="us-west-2"
-          SECRET_NAME="prod"
+          
+          # List all secrets in region1 and region2
+          SECRET_LIST1=$(aws secretsmanager list-secrets --region "$REGION1" --query 'SecretList[].Name' --output text)
+          SECRET_LIST2=$(aws secretsmanager list-secrets --region "$REGION2" --query 'SecretList[].Name' --output text)
 
-          # Fetch secrets as JSON strings
-          SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
-          SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
+          # Save secret lists to environment variables
+          echo "SECRET_LIST1=$SECRET_LIST1" >> $GITHUB_ENV
+          echo "SECRET_LIST2=$SECRET_LIST2" >> $GITHUB_ENV
 
-          # Save secrets as environment variables
-          echo "SECRET1=$SECRET1" >> $GITHUB_ENV
-          echo "SECRET2=$SECRET2" >> $GITHUB_ENV
-
-      # Step 3: Compare secrets using jq
+      # Step 3: Compare each secret across regions
       - name: Compare secrets using jq
         id: compare_secrets
         run: |
           set -e
 
-          # Sort and format secrets using jq
-          SORTED_SECRET1=$(echo "$SECRET1" | jq -S .)
-          SORTED_SECRET2=$(echo "$SECRET2" | jq -S .)
+          # Loop through each secret in the list
+          for SECRET_NAME in $SECRET_LIST1; do
+            echo "Comparing secret: $SECRET_NAME"
+            
+            # Fetch the secret value from both regions
+            SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
+            SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
+            
+            # Sort and format secrets using jq
+            SORTED_SECRET1=$(echo "$SECRET1" | jq -S .)
+            SORTED_SECRET2=$(echo "$SECRET2" | jq -S .)
 
-          # Compare sorted JSON strings
-          if [[ "$SORTED_SECRET1" == "$SORTED_SECRET2" ]]; then
-              echo "match=true" >> $GITHUB_ENV
-          else
-              echo "match=false" >> $GITHUB_ENV
+            # Compare sorted JSON strings
+            if [[ "$SORTED_SECRET1" == "$SORTED_SECRET2" ]]; then
+                echo "$SECRET_NAME: match=true" >> $GITHUB_ENV
+            else
+                echo "$SECRET_NAME: match=false" >> $GITHUB_ENV
 
-              # Identify mismatches using JSON comparison
-              REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c --argjson secret2 "$SORTED_SECRET2" \
-                'to_entries | map(select(.value != ($secret2[.key]))) | from_entries')
-              
-              REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c --argjson secret1 "$SORTED_SECRET1" \
-                'to_entries | map(select(.value != ($secret1[.key]))) | from_entries')
+                # Identify mismatches using JSON comparison
+                REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c --argjson secret2 "$SORTED_SECRET2" \
+                  'to_entries | map(select(.value != ($secret2[.key]))) | from_entries')
+                
+                REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c --argjson secret1 "$SORTED_SECRET1" \
+                  'to_entries | map(select(.value != ($secret1[.key]))) | from_entries')
 
-              # Ensure the output is correctly formatted as a JSON string
-              MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
-                '{region1_only: $region1_only, region2_only: $region2_only}')
+                # Ensure the output is correctly formatted as a JSON string
+                MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
+                  '{region1_only: $region1_only, region2_only: $region2_only}')
 
-              # Save mismatches to a file
-              echo "$MISMATCHES" > mismatches.json
+                # Save mismatches to a file
+                echo "$MISMATCHES" > mismatches_$SECRET_NAME.json
 
-              # Serialize mismatches to a string format
-              MISMATCHES_STRING=$(echo "$MISMATCHES" | jq -c .)
+                # Serialize mismatches to a string format
+                MISMATCHES_STRING=$(echo "$MISMATCHES" | jq -c .)
 
-              # Save mismatches as environment variable
-              echo "mismatches=$MISMATCHES_STRING" >> $GITHUB_ENV
-          fi
-        env:
-          SECRET1: ${{ env.SECRET1 }}
-          SECRET2: ${{ env.SECRET2 }}
+                # Save mismatches as environment variable
+                echo "mismatches_$SECRET_NAME=$MISMATCHES_STRING" >> $GITHUB_ENV
+            fi
+          done
 
       # Step 4: Notify Slack - Secrets Match
       - name: Notify Slack - Secrets Match
-        if: env.match == 'true'
+        if: ${{ contains(env.match, 'true') }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"✅ Secrets in both regions are identical."}' \
+          --data '{"text":"✅ All secrets are identical across regions."}' \
           ${{ secrets.SLACK_WEBHOOK_URL }}
 
       # Step 5: Notify Slack - Secrets Mismatched
       - name: Notify Slack - Secrets Mismatched
-        if: env.match == 'false'
+        if: ${{ contains(env.match, 'false') }}
         run: |
-          echo "Mismatches file: mismatches.json" # Debug output for mismatches
+          echo "Mismatches found, sending details..." # Debug output for mismatches
 
-          # Read mismatches into a string
-          MISMATCHES_STRING=$(cat mismatches.json)
+          # Loop through each mismatch file and send details to Slack
+          for MISMATCH_FILE in $(ls mismatches_*.json); do
+            MISMATCHES_STRING=$(cat $MISMATCH_FILE)
 
-          # Extract the mismatched environment variables (only the keys that differ)
-          REGION1_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region1_only | to_entries | map("\(.key): \(.value)") | .[]')
-          REGION2_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region2_only | to_entries | map("\(.key): \(.value)") | .[]')
+            # Extract the mismatched environment variables (only the keys that differ)
+            REGION1_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region1_only | to_entries | map("\(.key): \(.value)") | .[]')
+            REGION2_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region2_only | to_entries | map("\(.key): \(.value)") | .[]')
 
-          # Notify Slack with mismatches as an attachment
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{
-              \"text\": \"⚠️ Secrets in both regions do not match.\",
-              \"attachments\": [
-                  {
-                      \"text\": \"Mismatches in region 1: \n${REGION1_ONLY_KEYS}\nMismatches in region 2: \n${REGION2_ONLY_KEYS}\"
-                  }
-              ]
-          }" ${{ secrets.SLACK_WEBHOOK_URL }}
+            # Notify Slack with mismatches as an attachment
+            curl -X POST -H 'Content-type: application/json' \
+            --data "{
+                \"text\": \"⚠️ Secrets for $MISMATCH_FILE do not match.\",
+                \"attachments\": [
+                    {
+                        \"text\": \"Mismatches in region 1: \n${REGION1_ONLY_KEYS}\nMismatches in region 2: \n${REGION2_ONLY_KEYS}\"
+                    }
+                ]
+            }" ${{ secrets.SLACK_WEBHOOK_URL }}
+          done
