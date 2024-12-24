@@ -1,9 +1,9 @@
 name: Compare AWS Secrets
 
 on:
-  workflow_dispatch:  # Allows manual triggering of the workflow
+  workflow_dispatch: # Allows manual triggering of the workflow
   schedule:
-    - cron: '0 0 * * *'  # Runs daily at midnight
+    - cron: '0 0 * * *' # Runs daily at midnight
 
 jobs:
   compare-secrets:
@@ -16,12 +16,14 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1  # Default region for AWS CLI
+          aws-region: us-east-1 # Default region for AWS CLI
 
       # Step 2: Fetch secrets from both regions
       - name: Fetch secrets from both regions
         id: fetch_secrets
         run: |
+          set -e
+
           REGION1="us-east-1"
           REGION2="us-west-2"
           SECRET_NAME="prod"
@@ -30,35 +32,38 @@ jobs:
           SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
-          # Export secrets as environment variables
+          # Save secrets as environment variables
           echo "SECRET1=$SECRET1" >> $GITHUB_ENV
           echo "SECRET2=$SECRET2" >> $GITHUB_ENV
 
-      # Step 3: Compare secrets using jq
-      - name: Compare secrets
+      # Step 3: Compare secrets
+      - name: Compare secrets using jq
         id: compare_secrets
         run: |
-          # Convert JSON strings to sorted, formatted JSON for comparison
-          SORTED_SECRET1=$(echo "${{ env.SECRET1 }}" | jq -S .)
-          SORTED_SECRET2=$(echo "${{ env.SECRET2 }}" | jq -S .)
+          set -e
 
-          # Compare secrets and find mismatches
+          # Sort and format secrets using jq
+          SORTED_SECRET1=$(echo "$SECRET1" | jq -S .)
+          SORTED_SECRET2=$(echo "$SECRET2" | jq -S .)
+
+          # Compare sorted JSON strings
           if [[ "$SORTED_SECRET1" == "$SORTED_SECRET2" ]]; then
               echo "::set-output name=match::true"
           else
               echo "::set-output name=match::false"
 
               # Identify mismatches
-              REGION1_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" \
-                '$secret1 - $secret2')
-              REGION2_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" \
-                '$secret2 - $secret1')
+              REGION1_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" '$secret1 - $secret2')
+              REGION2_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" '$secret2 - $secret1')
 
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
               echo "::set-output name=mismatches::$MISMATCHES"
           fi
+        env:
+          SECRET1: ${{ env.SECRET1 }}
+          SECRET2: ${{ env.SECRET2 }}
 
       # Step 4: Notify Slack - Secrets Match
       - name: Notify Slack - Secrets Match
@@ -73,5 +78,7 @@ jobs:
         if: steps.compare_secrets.outputs.match == 'false'
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nMismatched details:\n${{ steps.compare_secrets.outputs.mismatches }}"}' \
+          --data "$(jq -n --arg text "⚠️ Secrets in both regions do not match." \
+          --arg mismatches "${{ steps.compare_secrets.outputs.mismatches }}" \
+          '{text: $text, details: $mismatches}')" \
           ${{ secrets.SLACK_WEBHOOK_URL }}
