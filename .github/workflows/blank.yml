@@ -18,7 +18,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1 # Default region for AWS CLI
 
-      # Step 2: Fetch the list of all secrets from both regions
+      # Step 2: Fetch all secrets from both regions
       - name: Fetch all secrets from both regions
         id: fetch_secrets
         run: |
@@ -31,18 +31,25 @@ jobs:
           SECRET_LIST1=$(aws secretsmanager list-secrets --region "$REGION1" --query 'SecretList[].Name' --output text)
           SECRET_LIST2=$(aws secretsmanager list-secrets --region "$REGION2" --query 'SecretList[].Name' --output text)
 
-          # Save secret lists to environment variables
+          # Combine and save secret names to environment variables
           echo "SECRET_LIST1=$SECRET_LIST1" >> $GITHUB_ENV
           echo "SECRET_LIST2=$SECRET_LIST2" >> $GITHUB_ENV
 
       # Step 3: Compare each secret across regions
-      - name: Compare secrets using jq
+      - name: Compare secrets one by one
         id: compare_secrets
         run: |
           set -e
 
-          # Loop through each secret in the list
-          for SECRET_NAME in $SECRET_LIST1; do
+          REGION1="us-east-1"
+          REGION2="us-west-2"
+          
+          # Split the list of secrets from both regions into arrays
+          IFS=' ' read -r -a SECRET_LIST1_ARRAY <<< "$SECRET_LIST1"
+          IFS=' ' read -r -a SECRET_LIST2_ARRAY <<< "$SECRET_LIST2"
+
+          # Loop through each secret in region1 and compare with region2
+          for SECRET_NAME in "${SECRET_LIST1_ARRAY[@]}"; do
             echo "Comparing secret: $SECRET_NAME"
             
             # Fetch the secret value from both regions
