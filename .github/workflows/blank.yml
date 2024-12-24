@@ -1,7 +1,7 @@
 name: Compare AWS Secrets
 
 on:
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
   schedule:
     - cron: '0 0 * * *' # Runs daily at midnight
 
@@ -23,7 +23,7 @@ jobs:
         id: fetch_secret_names
         run: |
           set -e
-
+          
           REGION1="us-east-1"
           REGION2="us-west-2"
 
@@ -37,21 +37,21 @@ jobs:
           VALID_SECRET_NAMES_1=$(echo "$SECRET_NAMES_1" | tr '\t' '\n' | grep -E '^[a-zA-Z0-9\-_+=.@!/]+$' || echo "")
           VALID_SECRET_NAMES_2=$(echo "$SECRET_NAMES_2" | tr '\t' '\n' | grep -E '^[a-zA-Z0-9\-_+=.@!/]+$' || echo "")
 
-          echo "VALID_SECRET_NAMES_1=\"$VALID_SECRET_NAMES_1\"" >> $GITHUB_ENV
-          echo "VALID_SECRET_NAMES_2=\"$VALID_SECRET_NAMES_2\"" >> $GITHUB_ENV
+          echo "VALID_SECRET_NAMES_1=$(echo $VALID_SECRET_NAMES_1 | tr '\n' ' ')" >> $GITHUB_ENV
+          echo "VALID_SECRET_NAMES_2=$(echo $VALID_SECRET_NAMES_2 | tr '\n' ' ')" >> $GITHUB_ENV
 
       # Step 3: Fetch and compare all secrets from both regions
       - name: Fetch and compare secrets
         id: compare_secrets
         run: |
           set -e
-
+          
           REGION1="us-east-1"
           REGION2="us-west-2"
 
           # Read validated secret names from environment
-          VALID_SECRET_NAMES_1=(${{ env.VALID_SECRET_NAMES_1 }})
-          VALID_SECRET_NAMES_2=(${{ env.VALID_SECRET_NAMES_2 }})
+          IFS=' ' read -r -a VALID_SECRET_NAMES_1 <<< "${{ env.VALID_SECRET_NAMES_1 }}"
+          IFS=' ' read -r -a VALID_SECRET_NAMES_2 <<< "${{ env.VALID_SECRET_NAMES_2 }}"
 
           MISMATCHES='{"region1_only": {}, "region2_only": {}}'
 
