@@ -1,10 +1,7 @@
 name: Compare Secrets in AWS
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_dispatch:  # Allows manual triggering
 
 jobs:
   compare-secrets:
@@ -36,6 +33,7 @@ jobs:
           IFS=' ' read -r -a VALID_SECRET_NAMES_2 <<< "prod prod1"
 
           MISMATCHES='{"region1_only": {}, "region2_only": {}, "mismatched_envs": {}}'
+          MATCHES="Secrets are the same across regions."
 
           for SECRET_NAME in "${VALID_SECRET_NAMES_1[@]}"; do
             SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
@@ -61,11 +59,16 @@ jobs:
                   --arg REGION1 "$REGION1_MISMATCHES" --arg REGION2 "$REGION2_MISMATCHES" \
                   '.mismatched_envs[$SECRET_NAME] = { "region1": $REGION1, "region2": $REGION2 }')
               fi
+            else
+              # If secrets are the same, update MATCHES message
+              MATCHES="Secrets for $SECRET_NAME are the same across regions."
             fi
           done
 
           echo "$MISMATCHES" > mismatches.json
           echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
+          echo "$MATCHES" > matches.json
+          echo "matches=$MATCHES" >> $GITHUB_ENV
 
       # Step 4: Upload mismatches JSON to GitHub for further analysis or debugging
       - name: Upload mismatches JSON as artifact
@@ -74,8 +77,14 @@ jobs:
           name: mismatches-json
           path: mismatches.json
 
-      # Optional: Slack Notification (if configured)
+  
       - name: Send Slack notification for mismatches
         if: ${{ steps.compare-secrets.outputs.mismatches != '{}' }}
         run: |
           curl -X POST -H 'Content-type: application/json' --data '{"text": "Secrets mismatch detected between AWS regions. Please check the mismatches.json artifact for details."}' ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      # Optional: Slack Notification for matches (if secrets are the same)
+      - name: Send Slack notification for matches
+        if: ${{ steps.compare-secrets.outputs.matches != 'Secrets are the same across regions.' }}
+        run: |
+          curl -X POST -H 'Content-type: application/json' --data '{"text": "Secrets are the same across regions for all checked secrets."}' ${{ secrets.SLACK_WEBHOOK_URL }}
