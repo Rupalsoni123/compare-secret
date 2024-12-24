@@ -23,7 +23,7 @@ jobs:
         id: fetch_secret_names
         run: |
           set -e
-          
+
           REGION1="us-east-1"
           REGION2="us-west-2"
 
@@ -45,7 +45,7 @@ jobs:
         id: compare_secrets
         run: |
           set -e
-          
+
           REGION1="us-east-1"
           REGION2="us-west-2"
 
@@ -91,15 +91,33 @@ jobs:
         if: ${{ env.mismatches != '{"region1_only":{},"region2_only":{}}' }}
         run: |
           MISMATCHES_STRING=$(cat mismatches.json)
-          REGION1_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region1_only | to_entries | map("\(.key): \(.value)") | .[]')
-          REGION2_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region2_only | to_entries | map("\(.key): \(.value)") | .[]')
+          
+          # Extract mismatched secrets
+          REGION1_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region1_only | to_entries | map("\(.key): \(.value | tostring)") | .[]')
+          REGION2_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region2_only | to_entries | map("\(.key): \(.value | tostring)") | .[]')
+
+          # Construct Slack message
+          REGION1_MESSAGE=""
+          REGION2_MESSAGE=""
+
+          while IFS= read -r line; do
+            SECRET_NAME=$(echo "$line" | cut -d: -f1)
+            SECRET_VALUES=$(echo "$line" | cut -d: -f2-)
+            REGION1_MESSAGE="${REGION1_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values:* ${SECRET_VALUES}"
+          done <<< "$REGION1_ONLY_KEYS"
+
+          while IFS= read -r line; do
+            SECRET_NAME=$(echo "$line" | cut -d: -f1)
+            SECRET_VALUES=$(echo "$line" | cut -d: -f2-)
+            REGION2_MESSAGE="${REGION2_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values:* ${SECRET_VALUES}"
+          done <<< "$REGION2_ONLY_KEYS"
 
           curl -X POST -H 'Content-type: application/json' \
           --data "{
               \"text\": \"⚠️ Secrets in both regions do not match.\",
               \"attachments\": [
                   {
-                      \"text\": \"Mismatches in region 1: \n${REGION1_ONLY_KEYS}\nMismatches in region 2: \n${REGION2_ONLY_KEYS}\"
+                      \"text\": \"*Region 1 mismatches:* \n${REGION1_MESSAGE}\n\n*Region 2 mismatches:* \n${REGION2_MESSAGE}\"
                   }
               ]
           }" ${{ secrets.SLACK_WEBHOOK_URL }}
