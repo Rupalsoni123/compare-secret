@@ -40,7 +40,7 @@ jobs:
           echo "VALID_SECRET_NAMES_1=$(echo $VALID_SECRET_NAMES_1 | tr '\n' ' ')" >> $GITHUB_ENV
           echo "VALID_SECRET_NAMES_2=$(echo $VALID_SECRET_NAMES_2 | tr '\n' ' ')" >> $GITHUB_ENV
 
-      # Step 3: Fetch and compare all secrets from both regions
+      # Step 3: Fetch and compare secrets
       - name: Fetch and compare secrets
         id: compare_secrets
         run: |
@@ -53,7 +53,7 @@ jobs:
           IFS=' ' read -r -a VALID_SECRET_NAMES_1 <<< "${{ env.VALID_SECRET_NAMES_1 }}"
           IFS=' ' read -r -a VALID_SECRET_NAMES_2 <<< "${{ env.VALID_SECRET_NAMES_2 }}"
 
-          MISMATCHES='{"region1_only": {}, "region2_only": {}}'
+          MISMATCHES='{"region1_only": {}, "region2_only": {}, "mismatched_envs": {}}'
 
           for SECRET_NAME in "${VALID_SECRET_NAMES_1[@]}"; do
             SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
@@ -69,9 +69,15 @@ jobs:
               REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c --argjson secret1 "$SORTED_SECRET1" \
                 'to_entries | map(select(.value != ($secret1[.key]))) | from_entries')
 
-              # Update mismatches
-              MISMATCHES=$(echo "$MISMATCHES" | jq -c --argjson r1 "$REGION1_ONLY" --argjson r2 "$REGION2_ONLY" \
-                '.region1_only += $r1 | .region2_only += $r2')
+              # Extract mismatched environment variables
+              REGION1_MISMATCHES=$(echo "$REGION1_ONLY" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
+              REGION2_MISMATCHES=$(echo "$REGION2_ONLY" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
+
+              if [[ -n "$REGION1_MISMATCHES" || -n "$REGION2_MISMATCHES" ]]; then
+                MISMATCHES=$(echo "$MISMATCHES" | jq -c --arg SECRET_NAME "$SECRET_NAME" \
+                  --argjson r1 "$REGION1_MISMATCHES" --argjson r2 "$REGION2_MISMATCHES" \
+                  '.mismatched_envs[$SECRET_NAME] = { "region1": $r1, "region2": $r2 }')
+              fi
             fi
           done
 
@@ -91,33 +97,29 @@ jobs:
         if: ${{ env.mismatches != '{"region1_only":{},"region2_only":{}}' }}
         run: |
           MISMATCHES_STRING=$(cat mismatches.json)
-          
-          # Extract mismatched secrets
-          REGION1_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region1_only | to_entries | map("\(.key): \(.value | tostring)") | .[]')
-          REGION2_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region2_only | to_entries | map("\(.key): \(.value | tostring)") | .[]')
 
           # Construct Slack message
-          REGION1_MESSAGE=""
-          REGION2_MESSAGE=""
+          MISMATCHES_MESSAGE="⚠️ Secrets in both regions do not match.\n"
 
-          while IFS= read -r line; do
-            SECRET_NAME=$(echo "$line" | cut -d: -f1)
-            SECRET_VALUES=$(echo "$line" | cut -d: -f2-)
-            REGION1_MESSAGE="${REGION1_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values in Region 1:* ${SECRET_VALUES}"
-          done <<< "$REGION1_ONLY_KEYS"
+          for SECRET_NAME in $(echo "$MISMATCHES_STRING" | jq -r '.mismatched_envs | keys | .[]'); do
+            REGION1_MESSAGE=""
+            REGION2_MESSAGE=""
+            
+            REGION1_MISMATCHES=$(echo "$MISMATCHES_STRING" | jq -r ".mismatched_envs[\"$SECRET_NAME\"].region1[]")
+            REGION2_MISMATCHES=$(echo "$MISMATCHES_STRING" | jq -r ".mismatched_envs[\"$SECRET_NAME\"].region2[]")
 
-          while IFS= read -r line; do
-            SECRET_NAME=$(echo "$line" | cut -d: -f1)
-            SECRET_VALUES=$(echo "$line" | cut -d: -f2-)
-            REGION2_MESSAGE="${REGION2_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values in Region 2:* ${SECRET_VALUES}"
-          done <<< "$REGION2_ONLY_KEYS"
+            while IFS= read -r line; do
+              REGION1_MESSAGE="${REGION1_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Value in Region 1:* ${line}"
+            done <<< "$REGION1_MISMATCHES"
+
+            while IFS= read -r line; do
+              REGION2_MESSAGE="${REGION2_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Value in Region 2:* ${line}"
+            done <<< "$REGION2_MISMATCHES"
+
+            MISMATCHES_MESSAGE="${MISMATCHES_MESSAGE}${REGION1_MESSAGE}\n${REGION2_MESSAGE}\n"
+          done
 
           curl -X POST -H 'Content-type: application/json' \
-          --data "{
-              \"text\": \"⚠️ Secrets in both regions do not match.\",
-              \"attachments\": [
-                  {
-                      \"text\": \"*Region 1 mismatches:* \n${REGION1_MESSAGE}\n\n*Region 2 mismatches:* \n${REGION2_MESSAGE}\"
-                  }
-              ]
-          }" ${{ secrets.SLACK_WEBHOOK_URL }}
+            --data "{
+                \"text\": \"$MISMATCHES_MESSAGE\"
+            }" ${{ secrets.SLACK_WEBHOOK_URL }}
