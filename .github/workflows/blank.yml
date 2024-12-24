@@ -103,13 +103,13 @@ jobs:
           while IFS= read -r line; do
             SECRET_NAME=$(echo "$line" | cut -d: -f1)
             SECRET_VALUES=$(echo "$line" | cut -d: -f2-)
-            REGION1_MESSAGE="${REGION1_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values:* ${SECRET_VALUES}"
+            REGION1_MESSAGE="${REGION1_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values in Region 1:* ${SECRET_VALUES}"
           done <<< "$REGION1_ONLY_KEYS"
 
           while IFS= read -r line; do
             SECRET_NAME=$(echo "$line" | cut -d: -f1)
             SECRET_VALUES=$(echo "$line" | cut -d: -f2-)
-            REGION2_MESSAGE="${REGION2_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values:* ${SECRET_VALUES}"
+            REGION2_MESSAGE="${REGION2_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Values in Region 2:* ${SECRET_VALUES}"
           done <<< "$REGION2_ONLY_KEYS"
 
           curl -X POST -H 'Content-type: application/json' \
