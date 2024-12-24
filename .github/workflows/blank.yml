@@ -32,9 +32,9 @@ jobs:
           SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
-          # Save secrets to environment variables
-          echo "SECRET1=$SECRET1" >> $GITHUB_ENV
-          echo "SECRET2=$SECRET2" >> $GITHUB_ENV
+          # Save secrets to output variables
+          echo "::set-output name=secret1::$SECRET1"
+          echo "::set-output name=secret2::$SECRET2"
 
       # Step 3: Compare secrets using Python
       - name: Compare secrets and find mismatched keys
@@ -47,7 +47,7 @@ jobs:
 import json
 import sys
 try:
-    secret = json.dumps(json.loads('${{ env.SECRET1 }}'), sort_keys=True)
+    secret = json.dumps(json.loads(\"${{ steps.fetch_secrets.outputs.secret1 }}\"), sort_keys=True)
     print(secret)
 except Exception as e:
     sys.exit('Invalid JSON in SECRET1: ' + str(e))
@@ -56,7 +56,7 @@ except Exception as e:
 import json
 import sys
 try:
-    secret = json.dumps(json.loads('${{ env.SECRET2 }}'), sort_keys=True)
+    secret = json.dumps(json.loads(\"${{ steps.fetch_secrets.outputs.secret2 }}\"), sort_keys=True)
     print(secret)
 except Exception as e:
     sys.exit('Invalid JSON in SECRET2: ' + str(e))
@@ -65,8 +65,8 @@ except Exception as e:
           # Identify mismatched keys and values using Python
           MISMATCHES=$(python3 -c "
 import json
-secret1 = json.loads(\"$SECRET1_JSON\")
-secret2 = json.loads(\"$SECRET2_JSON\")
+secret1 = json.loads(\"\"\"$SECRET1_JSON\"\"\")
+secret2 = json.loads(\"\"\"$SECRET2_JSON\"\"\")
 
 region1_only = {k: v for k, v in secret1.items() if k not in secret2 or secret1[k] != secret2[k]}
 region2_only = {k: v for k, v in secret2.items() if k not in secret1 or secret1[k] != secret2[k]}
@@ -79,31 +79,18 @@ mismatches = {
 print(json.dumps(mismatches, indent=2))
 ")
 
-          # Save mismatches to environment
-          echo "MISMATCHES=$MISMATCHES" >> $GITHUB_ENV
+          echo "::set-output name=mismatches::$MISMATCHES"
 
           # Check for differences
-          DIFFERENCES=$(python3 -c "
-import json
-import sys
-if \"$SECRET1_JSON\" == \"$SECRET2_JSON\":
-    print('true')
-else:
-    print('false')
-")
-
-          echo "DIFFERENCES=$DIFFERENCES" >> $GITHUB_ENV
-
-          # Output the match status
-          if [[ "$DIFFERENCES" == "true" ]]; then
-              echo "match=true" >> $GITHUB_ENV
+          if [[ "$SECRET1_JSON" == "$SECRET2_JSON" ]]; then
+              echo "::set-output name=match::true"
           else
-              echo "match=false" >> $GITHUB_ENV
+              echo "::set-output name=match::false"
           fi
 
       # Step 4: Notify Slack - Secrets Match
       - name: Notify Slack - Secrets Match
-        if: ${{ env.match == 'true' }}
+        if: steps.compare_secrets.outputs.match == 'true'
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"✅ Secrets in both regions are identical."}' \
@@ -111,8 +98,8 @@ else:
 
       # Step 5: Notify Slack - Secrets Mismatched
       - name: Notify Slack - Secrets Mismatched
-        if: ${{ env.match == 'false' }}
+        if: steps.compare_secrets.outputs.match == 'false'
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nMismatched details:\n'${{ env.MISMATCHES }}'"}' \
+          --data '{"text":"⚠️ Secrets in both regions do not match.\nMismatched details:\n${{ steps.compare_secrets.outputs.mismatches }}"}' \
           ${{ secrets.SLACK_WEBHOOK_URL }}
