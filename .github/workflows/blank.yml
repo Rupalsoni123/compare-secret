@@ -63,11 +63,11 @@ jobs:
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
-              # Serialize mismatches to a string format
-              MISMATCHES_STRING=$(echo "$MISMATCHES" | jq -c .)
+              # Save mismatches to a file
+              echo "$MISMATCHES" > mismatches.json
 
               # Save mismatches as environment variable
-              echo "mismatches=$MISMATCHES_STRING" >> $GITHUB_ENV
+              echo "mismatches_file=mismatches.json" >> $GITHUB_ENV
           fi
         env:
           SECRET1: ${{ env.SECRET1 }}
@@ -85,9 +85,10 @@ jobs:
       - name: Notify Slack - Secrets Mismatched
         if: env.match == 'false'
         run: |
-          echo "Mismatches: ${{ env.mismatches }}" # Debug output for mismatches
-          curl -X POST -H 'Content-type: application/json' \
-          --data "$(jq -n --arg text "⚠️ Secrets in both regions do not match." \
-          --arg mismatches "${{ env.mismatches }}" \
-          '{text: $text, details: $mismatches}')" \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+          echo "Mismatches file: ${{ env.mismatches_file }}" # Debug output for mismatches
+          
+          # Upload mismatches file to Slack
+          curl -F file=@${{ env.mismatches_file }} \
+            -F "initial_comment=⚠️ Secrets in both regions do not match." \
+            -F channels=${{ secrets.SLACK_CHANNEL }} \
+            -H "Authorization: Bearer ${{ secrets.SLACK_API_TOKEN }}"
