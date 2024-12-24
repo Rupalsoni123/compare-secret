@@ -90,9 +90,16 @@ jobs:
         run: |
           echo "Mismatches file: mismatches.json" # Debug output for mismatches
 
-          # Upload mismatches file to Slack
-          curl -F file=@mismatches.json \
-            -F "initial_comment=⚠️ Secrets in both regions do not match." \
-            -F channels=${{ secrets.SLACK_CHANNEL }} \
-            -H "Authorization: Bearer ${{ secrets.SLACK_API_TOKEN }}" \
-            https://slack.com/api/files.upload
+          # Prepare the JSON string with mismatches in the message
+          MISMATCHES_STRING=$(cat mismatches.json)
+
+          # Notify Slack with mismatches as an attachment
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{
+              \"text\": \"⚠️ Secrets in both regions do not match.\",
+              \"attachments\": [
+                  {
+                      \"text\": \"Mismatches: ${MISMATCHES_STRING}\"
+                  }
+              ]
+          }" ${{ secrets.SLACK_WEBHOOK_URL }}
