@@ -18,29 +18,15 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1 # Default region for AWS CLI
 
-      # Step 2: Fetch secrets from both regions
+      # Step 2: Fetch secrets from both regions (for example purposes, modify this according to your needs)
       - name: Fetch secrets from both regions
         id: fetch_secrets
         run: |
           set -e
 
-          REGION1="us-east-1"
-          REGION2="us-west-2"
-          SECRET_NAME="prod"
-
-          # Fetch secrets as JSON strings
-          SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
-          SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
-
-          # Save secrets as environment variables
-          echo "SECRET1=$SECRET1" >> $GITHUB_ENV
-          echo "SECRET2=$SECRET2" >> $GITHUB_ENV
-
-      # Step 3: Compare secrets
-      - name: Compare secrets using jq
-        id: compare_secrets
-        run: |
-          set -e
+          # Fetch secrets from AWS (Modify as per your region and secret names)
+          SECRET1=$(aws secretsmanager get-secret-value --secret-id secret1 --query SecretString --output text)
+          SECRET2=$(aws secretsmanager get-secret-value --secret-id secret2 --query SecretString --output text)
 
           # Sort and format secrets using jq
           SORTED_SECRET1=$(echo "$SECRET1" | jq -S .)
@@ -53,19 +39,20 @@ jobs:
               echo "match=false" >> $GITHUB_ENV
 
               # Identify mismatches using JSON comparison
-              REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c 'to_entries | map(select(.value != ($SORTED_SECRET2 | fromjson | .[.key]))) | from_entries')
-              REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c 'to_entries | map(select(.value != ($SORTED_SECRET1 | fromjson | .[.key]))) | from_entries')
+              REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c --argjson secret2 "$SORTED_SECRET2" \
+                'to_entries | map(select(.value != ($secret2[.key]))) | from_entries')
+              
+              REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c --argjson secret1 "$SORTED_SECRET1" \
+                'to_entries | map(select(.value != ($secret1[.key]))) | from_entries')
 
+              # Combine mismatches
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
               echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
           fi
-        env:
-          SECRET1: ${{ env.SECRET1 }}
-          SECRET2: ${{ env.SECRET2 }}
 
-      # Step 4: Notify Slack - Secrets Match
+      # Step 3: Notify Slack - Secrets Match
       - name: Notify Slack - Secrets Match
         if: env.match == 'true'
         run: |
@@ -73,7 +60,7 @@ jobs:
           --data '{"text":"✅ Secrets in both regions are identical."}' \
           ${{ secrets.SLACK_WEBHOOK_URL }}
 
-      # Step 5: Notify Slack - Secrets Mismatched
+      # Step 4: Notify Slack - Secrets Mismatched
       - name: Notify Slack - Secrets Mismatched
         if: env.match == 'false'
         run: |
