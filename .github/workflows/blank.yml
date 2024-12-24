@@ -1,48 +1,30 @@
-name: Compare AWS Secrets
+name: Compare Secrets in AWS
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * *' # Runs daily at midnight
 
 jobs:
   compare-secrets:
     runs-on: ubuntu-latest
-
     steps:
-      # Step 1: Configure AWS CLI
-      - name: Configure AWS CLI
-        uses: aws-actions/configure-aws-credentials@v3
+    
+      # Step 1: Checkout the repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        
+      # Step 2: Set up AWS CLI
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1 # Default region for AWS CLI
+          aws-region: us-east-1  # Set default region for AWS CLI
 
-      # Step 2: Fetch secret names from both regions
-      - name: Fetch and validate secret names
-        id: fetch_secret_names
-        run: |
-          set -e
-
-          REGION1="us-east-1"
-          REGION2="us-west-2"
-
-          echo "Fetching secret names from $REGION1 and $REGION2..."
-
-          # Fetch secret names from both regions
-          SECRET_NAMES_1=$(aws secretsmanager list-secrets --region "$REGION1" --query 'SecretList[].Name' --output text || echo "")
-          SECRET_NAMES_2=$(aws secretsmanager list-secrets --region "$REGION2" --query 'SecretList[].Name' --output text || echo "")
-
-          # Validate secret names
-          VALID_SECRET_NAMES_1=$(echo "$SECRET_NAMES_1" | tr '\t' '\n' | grep -E '^[a-zA-Z0-9\-_+=.@!/]+$' || echo "")
-          VALID_SECRET_NAMES_2=$(echo "$SECRET_NAMES_2" | tr '\t' '\n' | grep -E '^[a-zA-Z0-9\-_+=.@!/]+$' || echo "")
-
-          echo "VALID_SECRET_NAMES_1=$(echo $VALID_SECRET_NAMES_1 | tr '\n' ' ')" >> $GITHUB_ENV
-          echo "VALID_SECRET_NAMES_2=$(echo $VALID_SECRET_NAMES_2 | tr '\n' ' ')" >> $GITHUB_ENV
-
-      # Step 3: Fetch and compare secrets
-      - name: Fetch and compare secrets
-        id: compare_secrets
+      # Step 3: Run the secret comparison script
+      - name: Compare Secrets in AWS Regions
         run: |
           set -e
 
@@ -50,8 +32,8 @@ jobs:
           REGION2="us-west-2"
 
           # Read validated secret names from environment
-          IFS=' ' read -r -a VALID_SECRET_NAMES_1 <<< "${{ env.VALID_SECRET_NAMES_1 }}"
-          IFS=' ' read -r -a VALID_SECRET_NAMES_2 <<< "${{ env.VALID_SECRET_NAMES_2 }}"
+          IFS=' ' read -r -a VALID_SECRET_NAMES_1 <<< "prod prod1"
+          IFS=' ' read -r -a VALID_SECRET_NAMES_2 <<< "prod prod1"
 
           MISMATCHES='{"region1_only": {}, "region2_only": {}, "mismatched_envs": {}}'
 
@@ -74,9 +56,10 @@ jobs:
               REGION2_MISMATCHES=$(echo "$REGION2_ONLY" | jq -r 'to_entries | map("\(.key): \(.value)") | .[]')
 
               if [[ -n "$REGION1_MISMATCHES" || -n "$REGION2_MISMATCHES" ]]; then
+                # Use --arg instead of --argjson to pass plain strings
                 MISMATCHES=$(echo "$MISMATCHES" | jq -c --arg SECRET_NAME "$SECRET_NAME" \
-                  --argjson r1 "$REGION1_MISMATCHES" --argjson r2 "$REGION2_MISMATCHES" \
-                  '.mismatched_envs[$SECRET_NAME] = { "region1": $r1, "region2": $r2 }')
+                  --arg REGION1 "$REGION1_MISMATCHES" --arg REGION2 "$REGION2_MISMATCHES" \
+                  '.mismatched_envs[$SECRET_NAME] = { "region1": $REGION1, "region2": $REGION2 }')
               fi
             fi
           done
@@ -84,42 +67,16 @@ jobs:
           echo "$MISMATCHES" > mismatches.json
           echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
 
-      # Step 4: Notify Slack - Secrets Match
-      - name: Notify Slack - Secrets Match
-        if: ${{ env.mismatches == '{"region1_only":{},"region2_only":{}}' }}
+      # Step 4: Upload mismatches JSON to GitHub for further analysis or debugging
+      - name: Upload mismatches JSON as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: mismatches-json
+          path: mismatches.json
+
+      # Optional: Slack Notification (if configured)
+      - name: Send Slack notification for mismatches
+        if: ${{ steps.compare-secrets.outputs.mismatches != '{}' }}
         run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"✅ Secrets in both regions are identical."}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+          curl -X POST -H 'Content-type: application/json' --data '{"text": "Secrets mismatch detected between AWS regions. Please check the mismatches.json artifact for details."}' ${{ secrets.SLACK_WEBHOOK_URL }}
 
-      # Step 5: Notify Slack - Secrets Mismatched
-      - name: Notify Slack - Secrets Mismatched
-        if: ${{ env.mismatches != '{"region1_only":{},"region2_only":{}}' }}
-        run: |
-          MISMATCHES_STRING=$(cat mismatches.json)
-
-          # Construct Slack message
-          MISMATCHES_MESSAGE="⚠️ Secrets in both regions do not match.\n"
-
-          for SECRET_NAME in $(echo "$MISMATCHES_STRING" | jq -r '.mismatched_envs | keys | .[]'); do
-            REGION1_MESSAGE=""
-            REGION2_MESSAGE=""
-            
-            REGION1_MISMATCHES=$(echo "$MISMATCHES_STRING" | jq -r ".mismatched_envs[\"$SECRET_NAME\"].region1[]")
-            REGION2_MISMATCHES=$(echo "$MISMATCHES_STRING" | jq -r ".mismatched_envs[\"$SECRET_NAME\"].region2[]")
-
-            while IFS= read -r line; do
-              REGION1_MESSAGE="${REGION1_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Value in Region 1:* ${line}"
-            done <<< "$REGION1_MISMATCHES"
-
-            while IFS= read -r line; do
-              REGION2_MESSAGE="${REGION2_MESSAGE}\n*Secret:* ${SECRET_NAME}\n*Mismatched Value in Region 2:* ${line}"
-            done <<< "$REGION2_MISMATCHES"
-
-            MISMATCHES_MESSAGE="${MISMATCHES_MESSAGE}${REGION1_MESSAGE}\n${REGION2_MESSAGE}\n"
-          done
-
-          curl -X POST -H 'Content-type: application/json' \
-            --data "{
-                \"text\": \"$MISMATCHES_MESSAGE\"
-            }" ${{ secrets.SLACK_WEBHOOK_URL }}
