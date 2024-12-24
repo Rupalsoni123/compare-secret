@@ -48,18 +48,18 @@ jobs:
 
           # Compare sorted JSON strings
           if [[ "$SORTED_SECRET1" == "$SORTED_SECRET2" ]]; then
-              echo "::set-output name=match::true"
+              echo "match=true" >> $GITHUB_ENV
           else
-              echo "::set-output name=match::false"
+              echo "match=false" >> $GITHUB_ENV
 
-              # Identify mismatches
-              REGION1_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" '$secret1 - $secret2')
-              REGION2_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" '$secret2 - $secret1')
+              # Identify mismatches using JSON comparison
+              REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c 'to_entries | map(select(.value != ($SORTED_SECRET2 | fromjson | .[.key]))) | from_entries')
+              REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c 'to_entries | map(select(.value != ($SORTED_SECRET1 | fromjson | .[.key]))) | from_entries')
 
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
-              echo "::set-output name=mismatches::$MISMATCHES"
+              echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
           fi
         env:
           SECRET1: ${{ env.SECRET1 }}
@@ -67,7 +67,7 @@ jobs:
 
       # Step 4: Notify Slack - Secrets Match
       - name: Notify Slack - Secrets Match
-        if: steps.compare_secrets.outputs.match == 'true'
+        if: env.match == 'true'
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data '{"text":"✅ Secrets in both regions are identical."}' \
@@ -75,10 +75,10 @@ jobs:
 
       # Step 5: Notify Slack - Secrets Mismatched
       - name: Notify Slack - Secrets Mismatched
-        if: steps.compare_secrets.outputs.match == 'false'
+        if: env.match == 'false'
         run: |
           curl -X POST -H 'Content-type: application/json' \
           --data "$(jq -n --arg text "⚠️ Secrets in both regions do not match." \
-          --arg mismatches "${{ steps.compare_secrets.outputs.mismatches }}" \
+          --arg mismatches "$MISMATCHES" \
           '{text: $text, details: $mismatches}')" \
           ${{ secrets.SLACK_WEBHOOK_URL }}
