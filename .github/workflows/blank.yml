@@ -22,8 +22,6 @@ jobs:
       - name: Fetch secrets from both regions
         id: fetch_secrets
         run: |
-          set -e
-
           REGION1="us-east-1"
           REGION2="us-west-2"
           SECRET_NAME="prod"
@@ -32,60 +30,34 @@ jobs:
           SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
           SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
-          # Save secrets to output variables
-          echo "::set-output name=secret1::$SECRET1"
-          echo "::set-output name=secret2::$SECRET2"
+          # Export secrets as environment variables
+          echo "SECRET1=$SECRET1" >> $GITHUB_ENV
+          echo "SECRET2=$SECRET2" >> $GITHUB_ENV
 
-      # Step 3: Compare secrets using Python
-      - name: Compare secrets and find mismatched keys
+      # Step 3: Compare secrets using jq
+      - name: Compare secrets
         id: compare_secrets
         run: |
-          set -e
+          # Convert JSON strings to sorted, formatted JSON for comparison
+          SORTED_SECRET1=$(echo "${{ env.SECRET1 }}" | jq -S .)
+          SORTED_SECRET2=$(echo "${{ env.SECRET2 }}" | jq -S .)
 
-          # Parse secrets as JSON using Python
-          SECRET1_JSON=$(python3 -c "
-import json
-import sys
-try:
-    secret = json.dumps(json.loads(\"${{ steps.fetch_secrets.outputs.secret1 }}\"), sort_keys=True)
-    print(secret)
-except Exception as e:
-    sys.exit('Invalid JSON in SECRET1: ' + str(e))
-")
-          SECRET2_JSON=$(python3 -c "
-import json
-import sys
-try:
-    secret = json.dumps(json.loads(\"${{ steps.fetch_secrets.outputs.secret2 }}\"), sort_keys=True)
-    print(secret)
-except Exception as e:
-    sys.exit('Invalid JSON in SECRET2: ' + str(e))
-")
-
-          # Identify mismatched keys and values using Python
-          MISMATCHES=$(python3 -c "
-import json
-secret1 = json.loads(\"\"\"$SECRET1_JSON\"\"\")
-secret2 = json.loads(\"\"\"$SECRET2_JSON\"\"\")
-
-region1_only = {k: v for k, v in secret1.items() if k not in secret2 or secret1[k] != secret2[k]}
-region2_only = {k: v for k, v in secret2.items() if k not in secret1 or secret1[k] != secret2[k]}
-
-mismatches = {
-    'region1_only': region1_only,
-    'region2_only': region2_only
-}
-
-print(json.dumps(mismatches, indent=2))
-")
-
-          echo "::set-output name=mismatches::$MISMATCHES"
-
-          # Check for differences
-          if [[ "$SECRET1_JSON" == "$SECRET2_JSON" ]]; then
+          # Compare secrets and find mismatches
+          if [[ "$SORTED_SECRET1" == "$SORTED_SECRET2" ]]; then
               echo "::set-output name=match::true"
           else
               echo "::set-output name=match::false"
+
+              # Identify mismatches
+              REGION1_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" \
+                '$secret1 - $secret2')
+              REGION2_ONLY=$(jq -n --argjson secret1 "$SORTED_SECRET1" --argjson secret2 "$SORTED_SECRET2" \
+                '$secret2 - $secret1')
+
+              MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
+                '{region1_only: $region1_only, region2_only: $region2_only}')
+
+              echo "::set-output name=mismatches::$MISMATCHES"
           fi
 
       # Step 4: Notify Slack - Secrets Match
