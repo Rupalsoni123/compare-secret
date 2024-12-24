@@ -19,7 +19,7 @@ jobs:
           aws-region: us-east-1 # Default region for AWS CLI
 
       # Step 2: Fetch secret names from both regions
-      - name: Fetch secret names from both regions
+      - name: Fetch and validate secret names
         id: fetch_secret_names
         run: |
           set -e
@@ -29,36 +29,39 @@ jobs:
 
           echo "Fetching secret names from $REGION1 and $REGION2..."
 
-          # Fetch all secret names from both regions
+          # Fetch secret names from both regions
           SECRET_NAMES_1=$(aws secretsmanager list-secrets --region "$REGION1" --query 'SecretList[].Name' --output text || echo "")
           SECRET_NAMES_2=$(aws secretsmanager list-secrets --region "$REGION2" --query 'SecretList[].Name' --output text || echo "")
 
-          echo "SECRET_NAMES_1=\"$SECRET_NAMES_1\"" >> $GITHUB_ENV
-          echo "SECRET_NAMES_2=\"$SECRET_NAMES_2\"" >> $GITHUB_ENV
+          # Validate secret names
+          VALID_SECRET_NAMES_1=$(echo "$SECRET_NAMES_1" | tr '\t' '\n' | grep -E '^[a-zA-Z0-9\-_+=.@!/]+$' || echo "")
+          VALID_SECRET_NAMES_2=$(echo "$SECRET_NAMES_2" | tr '\t' '\n' | grep -E '^[a-zA-Z0-9\-_+=.@!/]+$' || echo "")
+
+          echo "VALID_SECRET_NAMES_1=\"$VALID_SECRET_NAMES_1\"" >> $GITHUB_ENV
+          echo "VALID_SECRET_NAMES_2=\"$VALID_SECRET_NAMES_2\"" >> $GITHUB_ENV
 
       # Step 3: Fetch and compare all secrets from both regions
-      - name: Fetch and compare all secrets
-        id: compare_all_secrets
+      - name: Fetch and compare secrets
+        id: compare_secrets
         run: |
           set -e
 
           REGION1="us-east-1"
           REGION2="us-west-2"
 
-          # Split secret names into arrays
-          SECRET_NAMES_1=(${{ env.SECRET_NAMES_1 }})
-          SECRET_NAMES_2=(${{ env.SECRET_NAMES_2 }})
+          # Read validated secret names from environment
+          VALID_SECRET_NAMES_1=(${{ env.VALID_SECRET_NAMES_1 }})
+          VALID_SECRET_NAMES_2=(${{ env.VALID_SECRET_NAMES_2 }})
 
-          # Initialize mismatch JSON
           MISMATCHES='{"region1_only": {}, "region2_only": {}}'
 
-          for SECRET_NAME in "${SECRET_NAMES_1[@]}"; do
+          for SECRET_NAME in "${VALID_SECRET_NAMES_1[@]}"; do
             SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
             SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
 
-            # Sort secrets and compare
-            SORTED_SECRET1=$(echo "$SECRET1" | jq -S .)
-            SORTED_SECRET2=$(echo "$SECRET2" | jq -S .)
+            # Sort secrets for comparison
+            SORTED_SECRET1=$(echo "$SECRET1" | jq -S . || echo "{}")
+            SORTED_SECRET2=$(echo "$SECRET2" | jq -S . || echo "{}")
 
             if [[ "$SORTED_SECRET1" != "$SORTED_SECRET2" ]]; then
               REGION1_ONLY=$(echo "$SORTED_SECRET1" | jq -c --argjson secret2 "$SORTED_SECRET2" \
@@ -66,7 +69,7 @@ jobs:
               REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c --argjson secret1 "$SORTED_SECRET1" \
                 'to_entries | map(select(.value != ($secret1[.key]))) | from_entries')
 
-              # Update mismatches JSON
+              # Update mismatches
               MISMATCHES=$(echo "$MISMATCHES" | jq -c --argjson r1 "$REGION1_ONLY" --argjson r2 "$REGION2_ONLY" \
                 '.region1_only += $r1 | .region2_only += $r2')
             fi
