@@ -1,88 +1,60 @@
-name: Compare AWS Secrets
+set -e
 
-on:
-  workflow_dispatch:  # Allows manual triggering of the workflow
-  schedule:
-    - cron: '0 0 * * *'  # Runs daily at midnight
+# Parse secrets as JSON using Python
+SECRET1_JSON=$(python3 -c "
+import json
+import sys
+try:
+    secret = json.dumps(json.loads('{\"name\":\"test\",\"test\":\"test1\",\"name1\":\"hello\"}'), sort_keys=True)
+    print(secret)
+except Exception as e:
+    sys.exit('Invalid JSON in SECRET1: ' + str(e))
+")
+SECRET2_JSON=$(python3 -c "
+import json
+import sys
+try:
+    secret = json.dumps(json.loads('{\"name\":\"test\",\"test\":\"test1\",\"name1\":\"hello1\"}'), sort_keys=True)
+    print(secret)
+except Exception as e:
+    sys.exit('Invalid JSON in SECRET2: ' + str(e))
+")
 
-jobs:
-  compare-secrets:
-    runs-on: ubuntu-latest
+# Identify mismatched keys and values using Python
+MISMATCHES=$(python3 -c "
+import json
+secret1 = json.loads(\"$SECRET1_JSON\")
+secret2 = json.loads(\"$SECRET2_JSON\")
 
-    steps:
-      # Step 1: Install jq (optional for JSON parsing)
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+region1_only = {k: v for k, v in secret1.items() if k not in secret2 or secret1[k] != secret2[k]}
+region2_only = {k: v for k, v in secret2.items() if k not in secret1 or secret1[k] != secret2[k]}
 
-      # Step 2: Configure AWS CLI
-      - name: Configure AWS CLI
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1  # Default region for AWS CLI
+mismatches = {
+    'region1_only': region1_only,
+    'region2_only': region2_only
+}
 
-      # Step 3: Fetch secrets from both regions
-      - name: Fetch secrets from both regions
-        id: fetch_secrets
-        run: |
-          set -e
+print(json.dumps(mismatches, indent=2))
+")
 
-          REGION1="us-east-1"
-          REGION2="us-west-2"
-          SECRET_NAME="prod"
+# Save mismatches to environment
+echo "MISMATCHES=$MISMATCHES" >> $GITHUB_ENV
 
-          # Fetch secrets as JSON strings
-          SECRET1=$(aws secretsmanager get-secret-value --region "$REGION1" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
-          SECRET2=$(aws secretsmanager get-secret-value --region "$REGION2" --secret-id "$SECRET_NAME" --query 'SecretString' --output text || echo "{}")
+# Check for differences
+DIFFERENCES=$(python3 -c "
+import json
+import sys
+if \"$SECRET1_JSON\" == \"$SECRET2_JSON\":
+    print('true')
+else:
+    print('false')
+")
 
-          # Save secrets to environment variables
-          echo "SECRET1=$SECRET1" >> $GITHUB_ENV
-          echo "SECRET2=$SECRET2" >> $GITHUB_ENV
+echo "DIFFERENCES=$DIFFERENCES" >> $GITHUB_ENV
 
-      # Step 4: Compare secrets and identify mismatches
-      - name: Compare secrets and find mismatched keys
-        id: compare_secrets
-        run: |
-          set -e
-
-          # Parse secrets as JSON
-          SECRET1_JSON=$(echo "${{ env.SECRET1 }}" | jq -c .)
-          SECRET2_JSON=$(echo "${{ env.SECRET2 }}" | jq -c .)
-
-          # Ensure valid JSON
-          if [[ -z "$SECRET1_JSON" || -z "$SECRET2_JSON" ]]; then
-            echo "Invalid JSON in secrets." >&2
-            exit 1
-          fi
-
-          # Identify mismatched keys and values
-          DIFF=$(diff <(echo "$SECRET1_JSON" | jq -S .) <(echo "$SECRET2_JSON" | jq -S .) || true)
-          MISMATCHES=$(jq -n --argjson s1 "$SECRET1_JSON" --argjson s2 "$SECRET2_JSON" \
-            '($s1 - $s2) as $diff1 | ($s2 - $s1) as $diff2 | {region1_only: $diff1, region2_only: $diff2}')
-
-          echo "DIFFERENCES=$DIFF" >> $GITHUB_ENV
-          echo "MISMATCHES=$MISMATCHES" >> $GITHUB_ENV
-
-          # Check if there are any mismatches
-          if [[ -z "$DIFF" ]]; then
-            echo "match=true" >> $GITHUB_ENV
-          else
-            echo "match=false" >> $GITHUB_ENV
-          fi
-
-      # Step 5: Notify Slack if secrets match
-      - name: Notify Slack - Secrets Match
-        if: env.match == 'true'
-        run: |
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"✅ Secrets in both regions are identical."}' ${{ secrets.SLACK_WEBHOOK_URL }}
-
-      # Step 6: Notify Slack with differences if secrets do not match
-      - name: Notify Slack - Secrets Mismatched
-        if: env.match == 'false'
-        run: |
-          MISMATCHES=$(echo "${{ env.MISMATCHES }}" | jq -c .)
-          curl -X POST -H 'Content-type: application/json' \
-          --data '{"text":"⚠️ Secrets in both regions do not match.\nMismatched details:\n'"$MISMATCHES"'"}' \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+# Output the match status
+if [[ "$DIFFERENCES" == "true" ]]; then
+    echo "match=true" >> $GITHUB_ENV
+else
+    echo "match=false" >> $GITHUB_ENV
+fi
