@@ -94,4 +94,5 @@ jobs:
           curl -F file=@mismatches.json \
             -F "initial_comment=⚠️ Secrets in both regions do not match." \
             -F channels=${{ secrets.SLACK_CHANNEL }} \
-            -H "Authorization: Bearer ${{ secrets.SLACK_API_TOKEN }}"
+            -H "Authorization: Bearer ${{ secrets.SLACK_API_TOKEN }}" \
+            https://slack.com/api/files.upload
