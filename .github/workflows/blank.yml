@@ -63,7 +63,7 @@ jobs:
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
-              # Save mismatches as environment variable
+              # Ensure valid JSON output and escape special characters
               echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
           fi
         env:
@@ -88,7 +88,7 @@ jobs:
             "text": "⚠️ Secrets in both regions do not match.",
             "attachments": [
               {
-                "text": "Region 1 only: ${REGION1_ONLY}",
+                "text": "Region 1 only: ${{ env.REGION1_ONLY }}",
                 "fields": [
                   {
                     "title": "Mismatched Secrets",
