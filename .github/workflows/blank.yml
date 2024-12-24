@@ -59,10 +59,11 @@ jobs:
               REGION2_ONLY=$(echo "$SORTED_SECRET2" | jq -c --argjson secret1 "$SORTED_SECRET1" \
                 'to_entries | map(select(.value != ($secret1[.key]))) | from_entries')
 
-              # Combine mismatches
+              # Ensure the output is correctly formatted as a JSON string
               MISMATCHES=$(jq -n --argjson region1_only "$REGION1_ONLY" --argjson region2_only "$REGION2_ONLY" \
                 '{region1_only: $region1_only, region2_only: $region2_only}')
 
+              # Save mismatches as environment variable
               echo "mismatches=$MISMATCHES" >> $GITHUB_ENV
           fi
         env:
