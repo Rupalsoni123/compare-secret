@@ -93,13 +93,17 @@ jobs:
           # Read mismatches into a string
           MISMATCHES_STRING=$(cat mismatches.json)
 
+          # Extract the mismatched environment variables (only the keys that differ)
+          REGION1_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region1_only | to_entries | map("\(.key): \(.value)") | .[]')
+          REGION2_ONLY_KEYS=$(echo "$MISMATCHES_STRING" | jq -r '.region2_only | to_entries | map("\(.key): \(.value)") | .[]')
+
           # Notify Slack with mismatches as an attachment
           curl -X POST -H 'Content-type: application/json' \
           --data "{
               \"text\": \"⚠️ Secrets in both regions do not match.\",
               \"attachments\": [
                   {
-                      \"text\": \"Mismatches: ${MISMATCHES_STRING}\"
+                      \"text\": \"Mismatches in region 1: \n${REGION1_ONLY_KEYS}\nMismatches in region 2: \n${REGION2_ONLY_KEYS}\"
                   }
               ]
           }" ${{ secrets.SLACK_WEBHOOK_URL }}
